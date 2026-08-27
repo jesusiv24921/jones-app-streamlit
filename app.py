@@ -1,7 +1,8 @@
 """JONES APP — Vp & Permeability stress correction (Jones equation).
 
 Streamlit port of the original MATLAB App Designer app (jones_app_exported.m)
-by Jesús Pacheco. Same inputs, same calibration formulas, same forward model.
+by Jesús Pacheco. Same inputs, same calibration formulas, same forward model —
+this file only changes the UI/UX layer, not the Jones equation math below.
 """
 
 import numpy as np
@@ -18,23 +19,12 @@ STRESS_GRID = np.arange(0, 4501, 100)  # 0..4500 psi, step 100 (46 points)
 
 SERIES_MEASURED = "#2a78d6"   # categorical slot 1 (blue)
 SERIES_MODEL = "#eb6834"      # categorical slot 2 (orange)
+MUTED_TEXT = "#52514e"
 
-EMPTY_ROW = {
-    "Depth (ft)": None,
-    "Net Stress (psi)": None,
-    "Vp (cc)": None,
-    "Porosity (%)": None,
-    "Kk (md)": None,
-}
-
-st.set_page_config(
-    page_title="JONES APP",
-    page_icon="🪨",
-    layout="wide",
-)
+st.set_page_config(page_title="JONES APP", page_icon="🪨", layout="wide")
 
 # ---------------------------------------------------------------------------
-# Jones equation
+# Jones equation — business logic, unchanged
 # ---------------------------------------------------------------------------
 
 
@@ -48,8 +38,7 @@ def compute_ak(kk: float) -> float:
 
 
 def calibrate_single(value0, stress0, coef):
-    x0 = value0 * (1 + C * stress0) * np.exp(coef * (1 - np.exp(-stress0 / SIGMA0)))
-    return x0
+    return value0 * (1 + C * stress0) * np.exp(coef * (1 - np.exp(-stress0 / SIGMA0)))
 
 
 def calibrate_two_stress(value1, stress1, value2, stress2):
@@ -70,17 +59,89 @@ def forward_model(x0, coef, stress):
 
 if "mode" not in st.session_state:
     st.session_state.mode = "Single Stress"
-if "data" not in st.session_state:
-    st.session_state.data = pd.DataFrame([EMPTY_ROW])
 if "coefs" not in st.session_state:
     st.session_state.coefs = None  # dict once Calculate succeeds
 
+FIELD_SPECS = [
+    ("depth", "Depth (ft) *", 0.0, None, 10.0, "%.1f", "Profundidad de la muestra en el pozo."),
+    ("stress", "Net Stress (psi) *", 0.0, None, 50.0, "%.0f", "Esfuerzo neto efectivo aplicado en el ensayo de laboratorio."),
+    ("vp", "Vp (cc) *", 0.0, None, 0.001, "%.4f", "Velocidad compresional medida en laboratorio."),
+    ("poro", "Porosity (%) *", 0.0, 100.0, 0.5, "%.1f", "Porosidad medida en la muestra (0-100)."),
+    ("kk", "Kk (md) *", 0.0, None, 0.5, "%.2f", "Permeabilidad Klinkenberg medida (debe ser mayor a 0)."),
+]
 
-def reset_all():
-    st.session_state.data = pd.DataFrame(
-        [EMPTY_ROW] * (1 if st.session_state.mode == "Single Stress" else 2)
-    )
+
+def field_key(name, point):
+    return f"f_{name}_{point}"
+
+
+def clear_fields():
+    for k in list(st.session_state.keys()):
+        if k.startswith("f_"):
+            del st.session_state[k]
     st.session_state.coefs = None
+
+
+@st.dialog("Reiniciar formulario")
+def confirm_reset_dialog():
+    st.write("Se perderán los datos ingresados y los resultados calculados. ¿Deseas continuar?")
+    c1, c2 = st.columns(2)
+    if c1.button("Sí, reiniciar", type="primary", use_container_width=True):
+        clear_fields()
+        st.rerun()
+    if c2.button("Cancelar", use_container_width=True):
+        st.rerun()
+
+
+def render_point_group(point, title):
+    """Renders one 'Punto de referencia' input group and returns (values, errors)."""
+    with st.container(border=True):
+        st.markdown(f"**{title}**")
+        cols = st.columns(len(FIELD_SPECS))
+        values = {}
+        for col, (name, label, vmin, vmax, step, fmt, help_text) in zip(cols, FIELD_SPECS):
+            key = field_key(name, point)
+            with col:
+                values[name] = st.number_input(
+                    label, min_value=vmin, max_value=vmax, step=step, format=fmt,
+                    help=help_text, key=key,
+                )
+
+        errors = []
+        if values["depth"] <= 0:
+            errors.append("Ingresa la profundidad (ft).")
+        if values["vp"] <= 0:
+            errors.append("Ingresa un Vp mayor a 0 (cc).")
+        if not (0 < values["poro"] <= 100):
+            errors.append("Ingresa una porosidad entre 0 y 100 (%).")
+        if values["kk"] <= 0:
+            errors.append("Ingresa un Kk mayor a 0 (md).")
+        for msg in errors:
+            st.caption(f":gray[{msg}]")
+
+        return values
+
+
+def fields_valid(values):
+    return (
+        values["depth"] > 0
+        and values["vp"] > 0
+        and 0 < values["poro"] <= 100
+        and values["kk"] > 0
+    )
+
+
+def empty_state(what):
+    with st.container(border=True):
+        st.markdown(
+            f"<div style='text-align:center; padding:2.5rem 1rem;'>"
+            f"<div style='font-size:2rem;'>📭</div>"
+            f"<div style='font-size:1.05rem;font-weight:600;margin-top:.5rem;'>Todavía no hay resultados</div>"
+            f"<div style='color:{MUTED_TEXT};margin-top:.25rem;'>"
+            f"Completa los datos en el <b>Paso 1 · Datos</b> y presiona <b>Calculate</b> para ver {what}.</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -99,103 +160,104 @@ with col_title:
     st.markdown("### APP TO DETERMINE VP AND PERMEABILITY WITH JONES EQUATION")
     st.caption("App designed by Jesús Pacheco · réplica en Streamlit de la app original en MATLAB")
 
-tab_data, tab_vp, tab_k = st.tabs(["📋 DATA", "🌊 VP", "🧪 K"])
+step1_done = "✓" if st.session_state.coefs else "1"
+st.caption(
+    f"**Paso 1 · Datos** {'✅' if st.session_state.coefs else ''}  →  "
+    f"**Paso 2 · Resultado VP**  →  **Paso 3 · Resultado K**"
+)
+
+tab_data, tab_vp, tab_k = st.tabs(["1️⃣ DATA", "2️⃣ VP", "3️⃣ K"])
 
 # ---------------------------------------------------------------------------
 # DATA tab
 # ---------------------------------------------------------------------------
 with tab_data:
     mode = st.radio(
-        "Button Group",
+        "Modo de calibración",
         options=["Single Stress", "Two Stress"],
         horizontal=True,
         key="mode",
-        on_change=reset_all,
-        label_visibility="collapsed",
+        on_change=clear_fields,
+        help="Single Stress calibra con 1 punto de laboratorio. Two Stress usa 2 puntos y suele ser más preciso.",
     )
 
-    n_rows = 1 if mode == "Single Stress" else 2
-    if len(st.session_state.data) != n_rows:
-        st.session_state.data = pd.DataFrame([EMPTY_ROW] * n_rows)
+    v1 = render_point_group("1", "Punto de referencia 1")
+    v2 = None
+    if mode == "Two Stress":
+        v2 = render_point_group("2", "Punto de referencia 2")
 
-    st.session_state.data = st.data_editor(
-        st.session_state.data,
-        num_rows="fixed",
-        use_container_width=True,
-        key="data_editor",
-    )
+    valid = fields_valid(v1) and (mode == "Single Stress" or (v2 and fields_valid(v2)))
+    same_stress = mode == "Two Stress" and valid and v1["stress"] == v2["stress"]
+    if same_stress:
+        valid = False
+        st.caption(":gray[Net Stress debe ser distinto entre el punto 1 y el punto 2.]")
 
     c1, c2 = st.columns(2)
-    calculate = c1.button("Calculate", type="primary", use_container_width=True)
-    delete = c2.button("Delete", use_container_width=True)
+    calculate = c1.button(
+        "Calculate", type="primary", use_container_width=True, disabled=not valid,
+        help=None if valid else "Completa todos los campos obligatorios (*) para habilitar el cálculo.",
+    )
+    delete = c2.button("Reiniciar", use_container_width=True)
 
     if delete:
-        reset_all()
-        st.rerun()
+        confirm_reset_dialog()
 
     if calculate:
-        df = st.session_state.data
-        try:
-            if mode == "Single Stress":
-                row = df.iloc[0]
-                p1, v1, poro1, kk1 = (
-                    float(row["Net Stress (psi)"]),
-                    float(row["Vp (cc)"]),
-                    float(row["Porosity (%)"]),
-                    float(row["Kk (md)"]),
-                )
-                av = compute_av(poro1)
-                vo = calibrate_single(v1, p1, av)
-                ak = compute_ak(kk1)
-                ko = calibrate_single(kk1, p1, ak)
-            else:
-                r1, r2 = df.iloc[0], df.iloc[1]
-                p1, v1 = float(r1["Net Stress (psi)"]), float(r1["Vp (cc)"])
-                p2, v2 = float(r2["Net Stress (psi)"]), float(r2["Vp (cc)"])
-                kk1, kk2 = float(r1["Kk (md)"]), float(r2["Kk (md)"])
-                av, vo = calibrate_two_stress(v1, p1, v2, p2)
-                ak, ko = calibrate_two_stress(kk1, p1, kk2, p2)
+        if mode == "Single Stress":
+            av = compute_av(v1["poro"])
+            vo = calibrate_single(v1["vp"], v1["stress"], av)
+            ak = compute_ak(v1["kk"])
+            ko = calibrate_single(v1["kk"], v1["stress"], ak)
+            measured = pd.DataFrame([{
+                "Depth (ft)": v1["depth"], "Net Stress (psi)": v1["stress"],
+                "Vp (cc)": v1["vp"], "Porosity (%)": v1["poro"], "Kk (md)": v1["kk"],
+            }])
+        else:
+            av, vo = calibrate_two_stress(v1["vp"], v1["stress"], v2["vp"], v2["stress"])
+            ak, ko = calibrate_two_stress(v1["kk"], v1["stress"], v2["kk"], v2["stress"])
+            measured = pd.DataFrame([
+                {"Depth (ft)": v1["depth"], "Net Stress (psi)": v1["stress"],
+                 "Vp (cc)": v1["vp"], "Porosity (%)": v1["poro"], "Kk (md)": v1["kk"]},
+                {"Depth (ft)": v2["depth"], "Net Stress (psi)": v2["stress"],
+                 "Vp (cc)": v2["vp"], "Porosity (%)": v2["poro"], "Kk (md)": v2["kk"]},
+            ])
 
-            st.session_state.coefs = {
-                "av": av, "Vo": vo,
-                "ak": ak, "Ko": ko,
-                "measured": df.copy(),
-            }
-            st.success("Coeficientes calculados. Revisa las pestañas VP y K.")
-        except (TypeError, ValueError):
-            st.error("Completa todas las celdas de la tabla con valores numéricos antes de calcular.")
-        except ZeroDivisionError:
-            st.error("Net Stress no puede repetirse entre filas en modo Two Stress.")
+        st.session_state.coefs = {"av": av, "Vo": vo, "ak": ak, "Ko": ko, "measured": measured}
+        st.toast("Coeficientes calculados correctamente", icon="✅")
+        st.success("✓ Coeficientes calculados. Revisa los pasos **VP** y **K** para ver el resultado.")
 
 
 # ---------------------------------------------------------------------------
-# Shared chart builder
+# Shared result renderer (VP / K tabs)
 # ---------------------------------------------------------------------------
 
 
-def render_result_tab(*, label, x0, coef, measured_col, y_axis_title, chart_title, curve_col_name):
+def render_result_tab(*, label, x0, coef, x0_help, coef_help, measured_col, y_axis_title, chart_title, curve_col_name, empty_label):
     coefs = st.session_state.coefs
     if coefs is None:
-        st.info("Ingresa los datos y presiona **Calculate** en la pestaña DATA.")
+        empty_state(empty_label)
         return
 
     left, right = st.columns([1, 2])
     with left:
-        st.markdown("**Jones equation coefficients**")
-        m1, m2 = st.columns(2)
-        m1.metric(f"{label}o", f"{x0:.3f}")
-        m2.metric(f"a{label}", f"{coef:.3f}")
-        m3, m4 = st.columns(2)
-        m3.metric("C", f"{C:.0e}")
-        m4.metric("σ0", f"{SIGMA0:.0f}")
+        with st.container(border=True):
+            st.markdown("**Jones equation coefficients**")
+            m1, m2 = st.columns(2)
+            m1.metric(f"{label}o", f"{x0:.3f}", help=x0_help)
+            m2.metric(f"a{label}", f"{coef:.3f}", help=coef_help)
+            m3, m4 = st.columns(2)
+            m3.metric("C", f"{C:.0e}", help="Constante de compresibilidad del modelo (fija).")
+            m4.metric("σ0", f"{SIGMA0:.0f}", help="Constante de esfuerzo de referencia del modelo (fija).")
 
-        st.markdown(f"**{label}**")
-        stress_input = st.number_input(
-            "Net Stress (psi)", min_value=0.0, value=float(measured_col.iloc[0]), step=50.0,
-            key=f"stress_input_{label}",
-        )
-        predicted = forward_model(x0, coef, stress_input)
-        st.metric(f"{label} predicted", f"{predicted:.3f}")
+        with st.container(border=True):
+            st.markdown(f"**Predicción de {label}**")
+            stress_input = st.number_input(
+                "Net Stress (psi)", min_value=0.0, value=float(measured_col.iloc[0]), step=50.0,
+                help="Esfuerzo neto al que quieres predecir el valor.",
+                key=f"stress_input_{label}",
+            )
+            predicted = forward_model(x0, coef, stress_input)
+            st.metric(f"{label} predicted", f"{predicted:.3f}")
 
     curve = pd.DataFrame({
         "Net Stress (psi)": STRESS_GRID,
@@ -226,34 +288,37 @@ def render_result_tab(*, label, x0, coef, measured_col, y_axis_title, chart_titl
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown(f"**{curve_col_name} vs Net Stress**")
-    st.dataframe(curve, use_container_width=True, hide_index=True)
-    st.download_button(
-        f"⬇️ Descargar curva {label} (CSV)",
-        curve.to_csv(index=False).encode("utf-8"),
-        file_name=f"jones_{label.lower()}_curve.csv",
-        mime="text/csv",
-    )
+    with st.container(border=True):
+        st.markdown(f"**{curve_col_name} vs Net Stress**")
+        st.dataframe(curve, use_container_width=True, hide_index=True)
+        st.download_button(
+            f"⬇️ Descargar curva {label} (CSV)",
+            curve.to_csv(index=False).encode("utf-8"),
+            file_name=f"jones_{label.lower()}_curve.csv",
+            mime="text/csv",
+        )
 
 
 with tab_vp:
     if st.session_state.coefs:
         render_result_tab(
             label="Vp", x0=st.session_state.coefs["Vo"], coef=st.session_state.coefs["av"],
+            x0_help="Vp a esfuerzo cero (cc).", coef_help="Sensibilidad de Vp al esfuerzo neto.",
             measured_col=st.session_state.coefs["measured"]["Vp (cc)"],
             y_axis_title="Vp (cc)", chart_title="VP vs Net Stress",
-            curve_col_name="Vp Jones (cc)",
+            curve_col_name="Vp Jones (cc)", empty_label="el resultado de VP",
         )
     else:
-        st.info("Ingresa los datos y presiona **Calculate** en la pestaña DATA.")
+        empty_state("el resultado de VP")
 
 with tab_k:
     if st.session_state.coefs:
         render_result_tab(
             label="Kk", x0=st.session_state.coefs["Ko"], coef=st.session_state.coefs["ak"],
+            x0_help="Kk a esfuerzo cero (md).", coef_help="Sensibilidad de Kk al esfuerzo neto.",
             measured_col=st.session_state.coefs["measured"]["Kk (md)"],
             y_axis_title="Kk (md)", chart_title="Kk vs Net Stress",
-            curve_col_name="K Jones (md)",
+            curve_col_name="K Jones (md)", empty_label="el resultado de K",
         )
     else:
-        st.info("Ingresa los datos y presiona **Calculate** en la pestaña DATA.")
+        empty_state("el resultado de K")
