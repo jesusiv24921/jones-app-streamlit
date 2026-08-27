@@ -19,19 +19,51 @@ STRESS_GRID = np.arange(0, 4501, 100)  # 0..4500 psi, step 100 (46 points)
 SERIES_MEASURED = "#2a78d6"   # categorical slot 1 (blue)
 SERIES_MODEL = "#eb6834"      # categorical slot 2 (orange)
 
-EMPTY_ROW = {
-    "Depth (ft)": None,
-    "Net Stress (psi)": None,
-    "Vp (cc)": None,
-    "Porosity (%)": None,
-    "Kk (md)": None,
-}
+EXAMPLE_SINGLE = [
+    {"Depth (ft)": 5200, "Net Stress (psi)": 800, "Vp (cc)": 5.3120, "Porosity (%)": 21, "Kk (md)": 116},
+]
+EXAMPLE_TWO = [
+    {"Depth (ft)": 5600, "Net Stress (psi)": 800, "Vp (cc)": 5.3120, "Porosity (%)": 21, "Kk (md)": 116},
+    {"Depth (ft)": 5600, "Net Stress (psi)": 2200, "Vp (cc)": 5.1220, "Porosity (%)": 19, "Kk (md)": 90},
+]
+DEFAULT_PREDICT_STRESS = 1500.0
 
 st.set_page_config(
     page_title="JONES APP",
     page_icon="🪨",
     layout="wide",
 )
+
+st.markdown("""
+<style>
+div[data-baseweb="tab-list"] {
+    gap: 6px;
+    border-bottom: 1px solid #e1e0d9;
+}
+button[data-baseweb="tab"] {
+    height: 46px;
+    padding: 0 22px;
+    border-radius: 10px 10px 0 0;
+    background-color: transparent;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #52514e;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+button[data-baseweb="tab"]:hover {
+    background-color: #f2f2f0;
+    color: #0b0b0b;
+}
+button[data-baseweb="tab"][aria-selected="true"] {
+    background-color: #eaf2fc;
+    color: #2a78d6;
+    box-shadow: inset 0 -3px 0 0 #2a78d6;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border-radius: 14px;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Jones equation
@@ -71,15 +103,14 @@ def forward_model(x0, coef, stress):
 if "mode" not in st.session_state:
     st.session_state.mode = "Single Stress"
 if "data" not in st.session_state:
-    st.session_state.data = pd.DataFrame([EMPTY_ROW])
+    st.session_state.data = pd.DataFrame(EXAMPLE_SINGLE)
 if "coefs" not in st.session_state:
     st.session_state.coefs = None  # dict once Calculate succeeds
 
 
 def reset_all():
-    st.session_state.data = pd.DataFrame(
-        [EMPTY_ROW] * (1 if st.session_state.mode == "Single Stress" else 2)
-    )
+    example = EXAMPLE_SINGLE if st.session_state.mode == "Single Stress" else EXAMPLE_TWO
+    st.session_state.data = pd.DataFrame(example)
     st.session_state.coefs = None
 
 
@@ -87,17 +118,18 @@ def reset_all():
 # Header
 # ---------------------------------------------------------------------------
 
-col_logo, col_title = st.columns([1, 5], vertical_alignment="center")
-with col_logo:
-    st.markdown(
-        "<div style='font-size:2.6rem;font-weight:800;line-height:1;'>"
-        "<span style='color:#0b0b0b;'>J</span><span style='color:#eda100;'>P</span>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-with col_title:
-    st.markdown("### APP TO DETERMINE VP AND PERMEABILITY WITH JONES EQUATION")
-    st.caption("App designed by Jesús Pacheco · réplica en Streamlit de la app original en MATLAB")
+with st.container(border=True):
+    col_logo, col_title = st.columns([1, 5], vertical_alignment="center")
+    with col_logo:
+        st.markdown(
+            "<div style='font-size:2.6rem;font-weight:800;line-height:1;'>"
+            "<span style='color:#0b0b0b;'>J</span><span style='color:#eda100;'>P</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    with col_title:
+        st.markdown("### APP TO DETERMINE VP AND PERMEABILITY WITH JONES EQUATION")
+        st.caption("App designed by Jesús Pacheco · réplica en Streamlit de la app original en MATLAB")
 
 tab_data, tab_vp, tab_k = st.tabs(["📋 DATA", "🌊 VP", "🧪 K"])
 
@@ -105,29 +137,30 @@ tab_data, tab_vp, tab_k = st.tabs(["📋 DATA", "🌊 VP", "🧪 K"])
 # DATA tab
 # ---------------------------------------------------------------------------
 with tab_data:
-    mode = st.radio(
-        "Button Group",
-        options=["Single Stress", "Two Stress"],
-        horizontal=True,
-        key="mode",
-        on_change=reset_all,
-        label_visibility="collapsed",
-    )
+    with st.container(border=True):
+        mode = st.radio(
+            "Button Group",
+            options=["Single Stress", "Two Stress"],
+            horizontal=True,
+            key="mode",
+            on_change=reset_all,
+            label_visibility="collapsed",
+        )
 
-    n_rows = 1 if mode == "Single Stress" else 2
-    if len(st.session_state.data) != n_rows:
-        st.session_state.data = pd.DataFrame([EMPTY_ROW] * n_rows)
+        n_rows = 1 if mode == "Single Stress" else 2
+        if len(st.session_state.data) != n_rows:
+            st.session_state.data = pd.DataFrame(EXAMPLE_SINGLE if mode == "Single Stress" else EXAMPLE_TWO)
 
-    st.session_state.data = st.data_editor(
-        st.session_state.data,
-        num_rows="fixed",
-        use_container_width=True,
-        key="data_editor",
-    )
+        st.session_state.data = st.data_editor(
+            st.session_state.data,
+            num_rows="fixed",
+            use_container_width=True,
+            key="data_editor",
+        )
 
-    c1, c2 = st.columns(2)
-    calculate = c1.button("Calculate", type="primary", use_container_width=True)
-    delete = c2.button("Delete", use_container_width=True)
+        c1, c2 = st.columns(2)
+        calculate = c1.button("Calculate", type="primary", use_container_width=True)
+        delete = c2.button("Delete", use_container_width=True)
 
     if delete:
         reset_all()
@@ -181,21 +214,23 @@ def render_result_tab(*, label, x0, coef, measured_col, y_axis_title, chart_titl
 
     left, right = st.columns([1, 2])
     with left:
-        st.markdown("**Jones equation coefficients**")
-        m1, m2 = st.columns(2)
-        m1.metric(f"{label}o", f"{x0:.3f}")
-        m2.metric(f"a{label}", f"{coef:.3f}")
-        m3, m4 = st.columns(2)
-        m3.metric("C", f"{C:.0e}")
-        m4.metric("σ0", f"{SIGMA0:.0f}")
+        with st.container(border=True):
+            st.markdown("**Jones equation coefficients**")
+            m1, m2 = st.columns(2)
+            m1.metric(f"{label}o", f"{x0:.3f}")
+            m2.metric(f"a{label}", f"{coef:.3f}")
+            m3, m4 = st.columns(2)
+            m3.metric("C", f"{C:.0e}")
+            m4.metric("σ0", f"{SIGMA0:.0f}")
 
-        st.markdown(f"**{label}**")
-        stress_input = st.number_input(
-            "Net Stress (psi)", min_value=0.0, value=float(measured_col.iloc[0]), step=50.0,
-            key=f"stress_input_{label}",
-        )
-        predicted = forward_model(x0, coef, stress_input)
-        st.metric(f"{label} predicted", f"{predicted:.3f}")
+        with st.container(border=True):
+            st.markdown(f"**{label}**")
+            stress_input = st.number_input(
+                "Net Stress (psi)", min_value=0.0, value=DEFAULT_PREDICT_STRESS, step=50.0,
+                key=f"stress_input_{label}",
+            )
+            predicted = forward_model(x0, coef, stress_input)
+            st.metric(f"{label} predicted", f"{predicted:.3f}")
 
     curve = pd.DataFrame({
         "Net Stress (psi)": STRESS_GRID,
@@ -226,14 +261,15 @@ def render_result_tab(*, label, x0, coef, measured_col, y_axis_title, chart_titl
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown(f"**{curve_col_name} vs Net Stress**")
-    st.dataframe(curve, use_container_width=True, hide_index=True)
-    st.download_button(
-        f"⬇️ Descargar curva {label} (CSV)",
-        curve.to_csv(index=False).encode("utf-8"),
-        file_name=f"jones_{label.lower()}_curve.csv",
-        mime="text/csv",
-    )
+    with st.container(border=True):
+        st.markdown(f"**{curve_col_name} vs Net Stress**")
+        st.dataframe(curve, use_container_width=True, hide_index=True)
+        st.download_button(
+            f"⬇️ Descargar curva {label} (CSV)",
+            curve.to_csv(index=False).encode("utf-8"),
+            file_name=f"jones_{label.lower()}_curve.csv",
+            mime="text/csv",
+        )
 
 
 with tab_vp:
